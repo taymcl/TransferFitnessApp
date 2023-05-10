@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/mobile_navigation"
+    app:startDestination="@+id/navigation_map">
+
+    <fragment
+        android:id="@+id/navigation_map"
+        android:name="com.example.fitnesstracker.ui.map.MapFragment"
+        android:label="@string/title_map"
+        tools:layout="@layout/fragment_map" />
+
+    <fragment
+        android:id="@+id/navigation_activity_log"
+        android:name="com.example.fitnesstracker.ui.activity_log.ActivityLogFragment"
+        android:label="@string/title_activity_log"
+        tools:layout="@layout/fragment_activity_log" />
+    <fragment
+        android:id="@+id/navigation_weather"
+        android:name="com.example.fitnesstracker.ui.weather.WeatherFragment"
+        android:label="Current Weather"
+        tools:layout="@layout/fragment_weather" />
+
+</navigation>

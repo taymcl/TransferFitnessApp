@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/navigation_map"
+        android:icon="@drawable/baseline_map_24"
+        android:title="@string/title_map"/>
+
+    <item
+        android:id="@+id/navigation_activity_log"
+        android:icon="@drawable/baseline_directions_run_24"
+        android:title="@string/title_activity_log"/>
+
+    <item
+        android:id="@+id/navigation_weather"
+        android:icon="@drawable/baseline_cloud_24"
+        android:title="@string/title_weather"/>
+
+</menu>
