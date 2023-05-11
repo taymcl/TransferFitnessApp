@@ -46,11 +46,12 @@ class ActivityLogFragment : Fragment() {
     // This property is only valid between onCreateView and
     // onDestroyView.
     private val binding get() = _binding!!
-    private var session: Session? = null
     private var inSession: Boolean = false
     private var startTime: Long = 0
     private var endTime: Long = 0
     private var sessionName = ""
+    lateinit var session: Session
+    private var distance = 0.0
 
 
     private val fitnessOptions = FitnessOptions.builder()
@@ -81,12 +82,15 @@ class ActivityLogFragment : Fragment() {
 
         val sessionButton: Button = binding.sessionButton
         sessionButton.setOnClickListener {
-            if (session == null && !inSession) {
-                sessionButton.setText("End Activity Session")
-                startSession()
-            } else {
-                sessionButton.setText("Start Activity Session")
-                endSession()
+            if (!inSession) {
+                inSession = true
+                sessionButton.text = "End Activity Session"
+                sessionManager()
+            }
+            else {
+                inSession = false
+                sessionButton.text = "Start Activity Session"
+                sessionManager()
             }
         }
         // Remember add this line
@@ -94,116 +98,145 @@ class ActivityLogFragment : Fragment() {
         return binding.root
     }
 
-    private fun startSession() {
-        inSession = true
-        Toast.makeText(context, "Activity session started!", Toast.LENGTH_SHORT).show()
-
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US)
-        sessionName = "Activity Session ${sdf.format(Date())}"
-
-        // Start recording the time
-        startTime = System.currentTimeMillis()
-
-        Fitness.getRecordingClient(requireActivity(), GoogleSignIn.getAccountForExtension(requireContext(), fitnessOptions))
-            // This example shows subscribing to a DataType, across all possible data
-            // sources. Alternatively, a specific DataSource can be used.
-            .subscribe(DataType.TYPE_DISTANCE_DELTA)
-
-    }
-
-
     @SuppressLint("SimpleDateFormat")
-    private fun endSession() {
+    private fun sessionManager() {
 
-        inSession = false
-        Toast.makeText(context, "Activity session ended!", Toast.LENGTH_SHORT).show()
-        val dbHelper = ActivityDbHelper(thiscontext)
+        // Initialize session
+        distance = 0.0
 
-        // Calculate the time
+        if (inSession) {
 
-        var distance: Double = 0.0
-        endTime = System.currentTimeMillis()
+            // Make toast message that activity session has started
+            Toast.makeText(context, "Activity session started!", Toast.LENGTH_SHORT).show()
 
+            // Set Session Name to current day and time
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US)
+            sessionName = "Activity Session ${sdf.format(Date())}"
 
-        val distanceDataSource = DataSource.Builder()
-            .setAppPackageName(requireContext().packageName)
-            .setDataType(DataType.TYPE_DISTANCE_DELTA)
-            .setStreamName("$sessionName-distance")
-            .setType(DataSource.TYPE_RAW)
-            .build()
+            // Start time is the current time
+            startTime = System.currentTimeMillis()
 
-        // Build a dataset that includes the session data
-        val distanceDp = DataPoint.builder(distanceDataSource)
-            .setField(Field.FIELD_DISTANCE, distance.toFloat())
-            .setTimeInterval(startTime, endTime, TimeUnit.MILLISECONDS)
-            .build()
+            // Create unique random ID for the session
+            val sessionId = UUID.randomUUID().toString()
 
-        val dataset = DataSet.builder(distanceDataSource)
-            .add(distanceDp)
-            .build()
+            // Build a new session
+            session = Session.Builder()
+                .setName(sessionName)
+                .setIdentifier(sessionId)
+                .setDescription("Walk")
+                .setActivity(FitnessActivities.WALKING)
+                .setStartTime(startTime, TimeUnit.MILLISECONDS)
+                .build()
 
-        val newSession = Session.Builder()
-            .setName(sessionName)
-            .setIdentifier("UniqueIdentifierHere")
-            .setDescription("Walk")
-            .setActivity(FitnessActivities.WALKING)
-            .setStartTime(startTime, TimeUnit.MILLISECONDS)
-            .setEndTime(endTime, TimeUnit.MILLISECONDS)
-            .build()
-
-
-        val insertrequest = SessionInsertRequest.Builder()
-            .setSession(newSession)
-            .addDataSet(dataset)
-            .build()
-
-
-        // Invoke the SessionsClient with the session identifier
-        Fitness.getSessionsClient(requireActivity(), GoogleSignIn.getAccountForExtension(requireContext(), fitnessOptions))
-            .insertSession(insertrequest)
-            .addOnSuccessListener {
-                Log.i(TAG, "Session inserted")
-                Fitness.getRecordingClient(
-                    requireActivity(),
-                    GoogleSignIn.getAccountForExtension(requireContext(), fitnessOptions)
-                )
-                    .unsubscribe(DataType.TYPE_DISTANCE_DELTA)
-            }
-
-        val readRequest = SessionReadRequest.Builder()
-            .read(DataType.TYPE_DISTANCE_DELTA)
-            .setSessionId(newSession.identifier)
-            .setTimeInterval(newSession.getStartTime(TimeUnit.MILLISECONDS), newSession.getEndTime(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
-            .build()
-
-
-        Fitness.getSessionsClient(requireActivity(), GoogleSignIn.getAccountForExtension(requireContext(), fitnessOptions))
-            .readSession(readRequest)
-            .addOnSuccessListener { response ->
-                val sessions = response.sessions
-                Log.i(TAG, "Number of returned sessions is: ${sessions.size}")
-                for (session in sessions) {
-                    val dataSets = response.getDataSet(session)
-                    for (dataSet in dataSets) {
-                        for (dataPoint in dataSet.dataPoints) {
-                            distance = dataPoint.getValue(Field.FIELD_DISTANCE).asFloat().toDouble()
-                            Log.i(TAG, "Distance: $distance")
-                        }
-                    }
+            // Subscribe to distance data (start recording distance data)
+            Fitness.getRecordingClient(requireContext(), GoogleSignIn.getAccountForExtension(requireActivity(), fitnessOptions))
+                .subscribe(DataType.TYPE_DISTANCE_DELTA)
+                .addOnSuccessListener {
+                    Log.i(TAG, "Successfully Subscribed!")
                 }
-                val tDelta: Long = endTime - startTime
-                val elapsedSeconds: Double = (tDelta / 1000.0) / 60
-                val formattedMinutes = String.format("%.2f", elapsedSeconds)
+                .addOnFailureListener {e ->
+                    Log.w(TAG, "There was a problem subscribing", e)
+                }
 
-                // Get the date
-                val calendar: Calendar = Calendar.getInstance()
-                val dateFormat = SimpleDateFormat("yyyy-MM-dd")
-                val currentDate: String = dateFormat.format(calendar.getTime())
+            // Log the session identifier for testing purposes
+            Log.w(TAG, "Session Identifier: ${session.identifier}")
 
-                // Add session info to the database
-                dbHelper.insertData(distance.toString(), currentDate, formattedMinutes)
-                //createFromDb()
-            }
+            // Start the Session
+            Fitness.getSessionsClient(requireContext(), GoogleSignIn.getAccountForExtension(requireActivity(), fitnessOptions))
+                .startSession(session)
+                .addOnSuccessListener {
+                    Log.i(TAG, "Session started successfully!")
+                    Log.i(TAG, "Session Identifier: ${session.identifier}") // Logging the session identifier again
+                }
+                .addOnFailureListener { e ->
+                    Log.w(TAG, "There was an error starting the session", e)
+                }
+        } else { // If user is ending the session
+
+            // Make notification that the activity session has ended
+            Toast.makeText(context, "Activity session ended!", Toast.LENGTH_SHORT).show()
+            val dbHelper = ActivityDbHelper(thiscontext)
+
+            // Invoke the SessionsClient to stop the session
+            Fitness.getSessionsClient(requireContext(), GoogleSignIn.getAccountForExtension(requireActivity(), fitnessOptions))
+                .stopSession(session.identifier) // Stopping the session
+                .addOnSuccessListener {
+                    Log.i(TAG, "Session stopped successfully!")
+
+                    // Using record client to stop recording distance data
+                    Fitness.getRecordingClient(
+                        requireContext(),
+                        GoogleSignIn.getAccountForExtension(requireActivity(), fitnessOptions)
+                    )
+                        .unsubscribe(DataType.TYPE_DISTANCE_DELTA) // Stop recording distance data
+                        .addOnSuccessListener {
+                            Log.i(TAG, "Successfully unsubscribed.")
+
+                            // Creating a session read request
+                            val readRequest = SessionReadRequest.Builder()
+                                .setSessionId(session.identifier)
+                                .setTimeInterval(
+                                    session.getStartTime(TimeUnit.MILLISECONDS),
+                                    System.currentTimeMillis(),
+                                    TimeUnit.MILLISECONDS
+                                )
+                                .read(DataType.TYPE_DISTANCE_DELTA)
+                                .build()
+
+                            // Getting the session client to read the session data
+                            Fitness.getSessionsClient(
+                                requireContext(),
+                                GoogleSignIn.getAccountForExtension(
+                                    requireActivity(),
+                                    fitnessOptions
+                                )
+                            )
+                                .readSession(readRequest) // Reading session data
+                                .addOnSuccessListener { response ->
+                                    val sessions = response.sessions
+                                    Log.i(TAG, "Number of returned sessions is: ${sessions.size}") // Logging the number of returned sessions (should be 1)
+
+                                    // Start querying for distance data (where I believe issue is)
+                                    for (session in sessions) {
+                                        val dataSets = response.getDataSet(session)
+                                        for (dataSet in dataSets) {
+                                            val dataPoints = dataSet.dataPoints
+                                            for (dataPoint in dataPoints) {
+                                                distance += dataPoint.getValue(Field.FIELD_DISTANCE) // Adding distance data points
+                                                    .asFloat().toDouble()
+                                            }
+                                        }
+                                    }
+                                    Log.i(TAG, "Distance: $distance") // Logging the distance user traveled
+                                } .addOnFailureListener {e ->
+                                    Log.w(TAG, "Failed to read Session", e)
+                                }
+
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w(TAG, "Failed to unsubscribe.")
+                            // Retry the unsubscribe request.
+                        }
+                }
+                .addOnFailureListener { e ->
+                    Log.w(TAG, "There was an error stopping the session", e)
+                }
+
+            // Get the time
+            endTime = System.currentTimeMillis()
+            val tDelta: Long = endTime - startTime
+            val elapsedSeconds: Double = (tDelta / 1000.0) / 60
+            val formattedMinutes = String.format("%.2f", elapsedSeconds)
+
+            // Get the date
+            val calendar: Calendar = Calendar.getInstance()
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd")
+            val currentDate: String = dateFormat.format(calendar.time)
+
+            // Add session info to the database
+            dbHelper.insertData(distance.toString(), currentDate, formattedMinutes)
+            //createFromDb()
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -224,17 +257,19 @@ class ActivityLogFragment : Fragment() {
 
         // Check if location and activity recognition permissions are granted
 
-        if (ActivityCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                requireContext(),
-                Manifest.permission.ACTIVITY_RECOGNITION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(requireActivity(), arrayOf(Manifest.permission.ACTIVITY_RECOGNITION), 1)
+        } else {
+            return
+        }
+        if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(requireActivity(), arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
+        } else {
+            return
+        }
+        if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(requireActivity(), arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), 1)
+        } else {
             return
         }
 
