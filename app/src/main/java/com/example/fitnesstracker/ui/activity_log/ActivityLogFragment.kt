@@ -54,14 +54,6 @@ class ActivityLogFragment : Fragment() {
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
 
 
-
-
-    private val fitnessOptions = FitnessOptions.builder()
-        .addDataType(DataType.TYPE_DISTANCE_DELTA, FitnessOptions.ACCESS_WRITE)
-        .addDataType(DataType.TYPE_DISTANCE_DELTA, FitnessOptions.ACCESS_READ)
-        .build()
-
-
     @RequiresApi(Build.VERSION_CODES.Q)
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -74,13 +66,6 @@ class ActivityLogFragment : Fragment() {
 
         _binding = FragmentActivityLogBinding.inflate(inflater, container, false)
 
-        if (!GoogleSignIn.hasPermissions(GoogleSignIn.getAccountForExtension(requireContext(), fitnessOptions), fitnessOptions)) {
-            GoogleSignIn.requestPermissions(
-                requireActivity(), // your activity
-                1, // e.g. 1
-                GoogleSignIn.getAccountForExtension(requireContext(), fitnessOptions),
-                fitnessOptions)
-        }
 
         val sessionButton: Button = binding.sessionButton
         sessionButton.setOnClickListener {
