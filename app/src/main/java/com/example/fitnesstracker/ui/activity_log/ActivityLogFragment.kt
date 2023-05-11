@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -26,16 +29,12 @@ import com.example.fitnesstracker.MyRecyclerAdapter
 import com.example.fitnesstracker.R
 import com.example.fitnesstracker.databinding.FragmentActivityLogBinding
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.fitness.Fitness
-import com.google.android.gms.fitness.FitnessActivities
 import com.google.android.gms.fitness.FitnessOptions
 import com.google.android.gms.fitness.data.*
-import com.google.android.gms.fitness.request.DataReadRequest
-import com.google.android.gms.fitness.request.SessionInsertRequest
-import com.google.android.gms.fitness.request.SessionReadRequest
 import java.text.SimpleDateFormat
 import java.util.*
-import java.util.concurrent.TimeUnit
+import kotlin.collections.ArrayList
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 
 class ActivityLogFragment : Fragment() {
@@ -49,9 +48,12 @@ class ActivityLogFragment : Fragment() {
     private var inSession: Boolean = false
     private var startTime: Long = 0
     private var endTime: Long = 0
-    private var sessionName = ""
-    lateinit var session: Session
     private var distance = 0.0
+    private lateinit var locationManager: LocationManager
+    private var lastLocation: Location? = null
+    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
+
+
 
 
     private val fitnessOptions = FitnessOptions.builder()
@@ -65,7 +67,7 @@ class ActivityLogFragment : Fragment() {
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View {
+    ): View? {
         thiscontext = container!!.context
         val dashboardViewModel =
             ViewModelProvider(this)[ActivityLogViewModel::class.java]
@@ -93,139 +95,95 @@ class ActivityLogFragment : Fragment() {
                 sessionManager()
             }
         }
+
+        swipeRefreshLayout = binding.swipeRefreshLayout
+        swipeRefreshLayout.setOnRefreshListener {
+            refreshRecyclerView()
+        }
         // Remember add this line
 
         return binding.root
     }
 
+    private fun startLocationUpdates() {
+        locationManager = requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        // Register the location listener
+        if (ActivityCompat.checkSelfPermission(
+                requireContext(),
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
+                requireContext(),
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        locationManager.requestLocationUpdates(
+            LocationManager.GPS_PROVIDER,
+            5000,
+            5f,
+            locationListener
+        )
+    }
+    private fun stopLocationUpdates() {
+        locationManager.removeUpdates(locationListener)
+    }
+
+
+    private val locationListener = LocationListener { location ->
+        onLocationUpdated(location)
+    }
+
+    private val dataPoints = ArrayList<Double>()
+
+    private fun onLocationUpdated(location: Location) {
+        if (lastLocation == null) {
+            lastLocation = location
+        } else {
+            val distanceInMeters = lastLocation?.distanceTo(location)
+            lastLocation = location
+            if (distanceInMeters != null) {
+                dataPoints.add(distanceInMeters.toDouble())
+                Log.w(TAG, "Distance Added: $distanceInMeters")
+            }
+        }
+    }
+
     @SuppressLint("SimpleDateFormat")
     private fun sessionManager() {
-
-        // Initialize session
-        distance = 0.0
-
         if (inSession) {
+            // Initialize session
+            distance = 0.0
+            lastLocation = null
+            dataPoints.clear()
+            startLocationUpdates()
 
             // Make toast message that activity session has started
             Toast.makeText(context, "Activity session started!", Toast.LENGTH_SHORT).show()
 
-            // Set Session Name to current day and time
-            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US)
-            sessionName = "Activity Session ${sdf.format(Date())}"
-
-            // Start time is the current time
             startTime = System.currentTimeMillis()
 
-            // Create unique random ID for the session
-            val sessionId = UUID.randomUUID().toString()
 
-            // Build a new session
-            session = Session.Builder()
-                .setName(sessionName)
-                .setIdentifier(sessionId)
-                .setDescription("Walk")
-                .setActivity(FitnessActivities.WALKING)
-                .setStartTime(startTime, TimeUnit.MILLISECONDS)
-                .build()
-
-            // Subscribe to distance data (start recording distance data)
-            Fitness.getRecordingClient(requireContext(), GoogleSignIn.getAccountForExtension(requireActivity(), fitnessOptions))
-                .subscribe(DataType.TYPE_DISTANCE_DELTA)
-                .addOnSuccessListener {
-                    Log.i(TAG, "Successfully Subscribed!")
-                }
-                .addOnFailureListener {e ->
-                    Log.w(TAG, "There was a problem subscribing", e)
-                }
-
-            // Log the session identifier for testing purposes
-            Log.w(TAG, "Session Identifier: ${session.identifier}")
-
-            // Start the Session
-            Fitness.getSessionsClient(requireContext(), GoogleSignIn.getAccountForExtension(requireActivity(), fitnessOptions))
-                .startSession(session)
-                .addOnSuccessListener {
-                    Log.i(TAG, "Session started successfully!")
-                    Log.i(TAG, "Session Identifier: ${session.identifier}") // Logging the session identifier again
-                }
-                .addOnFailureListener { e ->
-                    Log.w(TAG, "There was an error starting the session", e)
-                }
         } else { // If user is ending the session
+
+            stopLocationUpdates()
+            lastLocation = null
 
             // Make notification that the activity session has ended
             Toast.makeText(context, "Activity session ended!", Toast.LENGTH_SHORT).show()
             val dbHelper = ActivityDbHelper(thiscontext)
-
-            // Invoke the SessionsClient to stop the session
-            Fitness.getSessionsClient(requireContext(), GoogleSignIn.getAccountForExtension(requireActivity(), fitnessOptions))
-                .stopSession(session.identifier) // Stopping the session
-                .addOnSuccessListener {
-                    Log.i(TAG, "Session stopped successfully!")
-
-                    // Using record client to stop recording distance data
-                    Fitness.getRecordingClient(
-                        requireContext(),
-                        GoogleSignIn.getAccountForExtension(requireActivity(), fitnessOptions)
-                    )
-                        .unsubscribe(DataType.TYPE_DISTANCE_DELTA) // Stop recording distance data
-                        .addOnSuccessListener {
-                            Log.i(TAG, "Successfully unsubscribed.")
-
-                            // Creating a session read request
-                            val readRequest = SessionReadRequest.Builder()
-                                .setSessionId(session.identifier)
-                                .setTimeInterval(
-                                    session.getStartTime(TimeUnit.MILLISECONDS),
-                                    System.currentTimeMillis(),
-                                    TimeUnit.MILLISECONDS
-                                )
-                                .read(DataType.TYPE_DISTANCE_DELTA)
-                                .build()
-
-                            // Getting the session client to read the session data
-                            Fitness.getSessionsClient(
-                                requireContext(),
-                                GoogleSignIn.getAccountForExtension(
-                                    requireActivity(),
-                                    fitnessOptions
-                                )
-                            )
-                                .readSession(readRequest) // Reading session data
-                                .addOnSuccessListener { response ->
-                                    val sessions = response.sessions
-                                    Log.i(TAG, "Number of returned sessions is: ${sessions.size}") // Logging the number of returned sessions (should be 1)
-
-                                    // Start querying for distance data (where I believe issue is)
-                                    for (session in sessions) {
-                                        val dataSets = response.getDataSet(session)
-                                        for (dataSet in dataSets) {
-                                            val dataPoints = dataSet.dataPoints
-                                            for (dataPoint in dataPoints) {
-                                                distance += dataPoint.getValue(Field.FIELD_DISTANCE) // Adding distance data points
-                                                    .asFloat().toDouble()
-                                            }
-                                        }
-                                    }
-                                    Log.i(TAG, "Distance: $distance") // Logging the distance user traveled
-                                } .addOnFailureListener {e ->
-                                    Log.w(TAG, "Failed to read Session", e)
-                                }
-
-                        }
-                        .addOnFailureListener { e ->
-                            Log.w(TAG, "Failed to unsubscribe.")
-                            // Retry the unsubscribe request.
-                        }
-                }
-                .addOnFailureListener { e ->
-                    Log.w(TAG, "There was an error stopping the session", e)
-                }
-
             // Get the time
             endTime = System.currentTimeMillis()
+            // Set Session Name to current day and time
+
+
+            for (dataPoint in dataPoints) {
+                distance += dataPoint
+                Log.w(TAG, "Total Distance So Far: $distance")
+            }
+
             val tDelta: Long = endTime - startTime
-            val elapsedSeconds: Double = (tDelta / 1000.0) / 60
+            val elapsedSeconds: Double = (tDelta / 60000.0)
             val formattedMinutes = String.format("%.2f", elapsedSeconds)
 
             // Get the date
@@ -234,7 +192,7 @@ class ActivityLogFragment : Fragment() {
             val currentDate: String = dateFormat.format(calendar.time)
 
             // Add session info to the database
-            dbHelper.insertData(distance.toString(), currentDate, formattedMinutes)
+            dbHelper.insertData(distance.toInt().toString(), currentDate, formattedMinutes)
             //createFromDb()
         }
     }
@@ -283,12 +241,22 @@ class ActivityLogFragment : Fragment() {
         while (cursor.moveToNext()) {
             val activity = LoggedActivity(
                 "Date: ${cursor.getString(2)}",
-                " Time Elapsed: ${cursor.getString(3)}",
-                "Distance: ${cursor.getString(1)}"
+                "Minutes Elapsed: ${cursor.getString(3)}",
+                "Distance: ${cursor.getString(1)} Meters"
             )
             activities.add(activity)
         }
         return activities
+    }
+
+    // Used for swipe to refresh
+    private fun refreshRecyclerView() {
+        val recyclerView: RecyclerView = binding.recyclerView
+
+        // Build the recyclerView from the database
+        recyclerView.adapter = MyRecyclerAdapter(createFromDb())
+
+        swipeRefreshLayout.isRefreshing = false
     }
 
     override fun onDestroyView() {
@@ -296,4 +264,3 @@ class ActivityLogFragment : Fragment() {
         _binding = null
     }
 }
-
